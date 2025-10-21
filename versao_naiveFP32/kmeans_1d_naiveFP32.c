@@ -14,6 +14,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <float.h>
 
 /* ---------- util CSV 1D: cada linha tem 1 número ---------- */
 static int count_rows(const char *path){
@@ -31,10 +32,10 @@ static int count_rows(const char *path){
     return rows;
 }
 
-static double *read_csv_1col(const char *path, int *n_out){
+static float *read_csv_1col(const char *path, int *n_out){
     int R = count_rows(path);
     if(R<=0){ fprintf(stderr,"Arquivo vazio: %s\n", path); exit(1); }
-    double *A = (double*)malloc((size_t)R * sizeof(double));
+    float *A = (float*)malloc((size_t)R * sizeof(float));
     if(!A){ fprintf(stderr,"Sem memoria para %d linhas\n", R); exit(1); }
 
     FILE *f = fopen(path, "r");
@@ -53,7 +54,7 @@ static double *read_csv_1col(const char *path, int *n_out){
         const char *delim = ",; \t";
         char *tok = strtok(line, delim);
         if(!tok){ fprintf(stderr,"Linha %d sem valor em %s\n", r+1, path); free(A); fclose(f); exit(1); }
-        A[r] = atof(tok);
+        A[r] = strtof(tok, NULL);
         r++;
         if(r>R) break;
     }
@@ -70,7 +71,7 @@ static void write_assign_csv(const char *path, const int *assign, int N){
     fclose(f);
 }
 
-static void write_centroids_csv(const char *path, const double *C, int K, const int *counts){
+static void write_centroids_csv(const char *path, const float *C, int K, const int *counts){
     if(!path) return;
     FILE *f = fopen(path, "w");
     if(!f){ fprintf(stderr,"Erro ao abrir %s para escrita\n", path); return; }
@@ -83,14 +84,14 @@ static void write_centroids_csv(const char *path, const double *C, int K, const 
 
 /* ---------- k-means 1D ---------- */
 /* assignment: para cada X[i], encontra c com menor (X[i]-C[c])^2 */
-static double assignment_step_1d(const double *X, const double *C, int *assign, int N, int K){
-    double sse = 0.0;
+static float assignment_step_1d(const float *X, const float *C, int *assign, int N, int K){
+    float sse = 0.0f;
     for(int i=0;i<N;i++){
         int best = -1;
-        double bestd = 1e300;
+        float bestd = FLT_MAX;
         for(int c=0;c<K;c++){
-            double diff = X[i] - C[c];
-            double d = diff*diff;
+            float diff = X[i] - C[c];
+            float d = diff*diff;
             if(d < bestd){ bestd = d; best = c; }
         }
         assign[i] = best;
@@ -101,8 +102,8 @@ static double assignment_step_1d(const double *X, const double *C, int *assign, 
 
 /* update: média dos pontos de cada cluster (1D)
    se cluster vazio, copia X[0] (estratégia naive) */
-static void update_step_1d(const double *X, double *C, const int *assign, int N, int K){
-    double *sum = (double*)calloc((size_t)K, sizeof(double));
+static void update_step_1d(const float *X, float *C, const int *assign, int N, int K){
+    float *sum = (float*)calloc((size_t)K, sizeof(float));
     int *cnt = (int*)calloc((size_t)K, sizeof(int));
     if(!sum || !cnt){ fprintf(stderr,"Sem memoria no update\n"); exit(1); }
 
@@ -112,23 +113,23 @@ static void update_step_1d(const double *X, double *C, const int *assign, int N,
         sum[a] += X[i];
     }
     for(int c=0;c<K;c++){
-        if(cnt[c] > 0) C[c] = sum[c] / (double)cnt[c];
+        if(cnt[c] > 0) C[c] = sum[c] / (float)cnt[c];
         else           C[c] = X[0]; /* simples: cluster vazio recebe o primeiro ponto */
     }
     free(sum); free(cnt);
 }
 
-static void kmeans_1d(const double *X, double *C, int *assign,
-                      int N, int K, int max_iter, double eps,
-                      int *iters_out, double *sse_out)
+static void kmeans_1d(const float *X, float *C, int *assign,
+                      int N, int K, int max_iter, float eps,
+                      int *iters_out, float *sse_out)
 {
-    double prev_sse = 1e300;
-    double sse = 0.0;
+    float prev_sse = FLT_MAX;
+    float sse = 0.0f;
     int it;
     for(it=0; it<max_iter; it++){
         sse = assignment_step_1d(X, C, assign, N, K);
         /* parada por variação relativa do SSE */
-        double rel = fabs(sse - prev_sse) / (prev_sse > 0.0 ? prev_sse : 1.0);
+        float rel = fabsf(sse - prev_sse) / (prev_sse > 0.0f ? prev_sse : 1.0f);
         if(rel < eps){ it++; break; }
         update_step_1d(X, C, assign, N, K);
         prev_sse = sse;
@@ -148,23 +149,23 @@ int main(int argc, char **argv){
     const char *pathX = argv[1];
     const char *pathC = argv[2];
     int max_iter = (argc>3)? atoi(argv[3]) : 50;
-    double eps   = (argc>4)? atof(argv[4]) : 1e-4;
+    float eps   = (argc>4)? strtof(argv[4], NULL) : 1e-4f;
     const char *outAssign   = (argc>5)? argv[5] : NULL;
     const char *outCentroid = (argc>6)? argv[6] : NULL;
 
-    if(max_iter <= 0 || eps <= 0.0){
+    if(max_iter <= 0 || eps <= 0.0f){
         fprintf(stderr,"Parâmetros inválidos: max_iter>0 e eps>0\n");
         return 1;
     }
 
     int N=0, K=0;
-    double *X = read_csv_1col(pathX, &N);
-    double *C = read_csv_1col(pathC, &K);
+    float *X = read_csv_1col(pathX, &N);
+    float *C = read_csv_1col(pathC, &K);
     int *assign = (int*)malloc((size_t)N * sizeof(int));
     if(!assign){ fprintf(stderr,"Sem memoria para assign\n"); free(X); free(C); return 1; }
 
     clock_t t0 = clock();
-    int iters = 0; double sse = 0.0;
+    int iters = 0; float sse = 0.0f;
     kmeans_1d(X, C, assign, N, K, max_iter, eps, &iters, &sse);
     clock_t t1 = clock();
     double ms = 1000.0 * (double)(t1 - t0) / (double)CLOCKS_PER_SEC;
